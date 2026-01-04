@@ -1,6 +1,6 @@
-__import__('pysqlite3')
-import sys
-sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
+# __import__('pysqlite3')
+# import sys
+# sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
 
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -11,19 +11,27 @@ from langchain_openai import ChatOpenAI
 from langchain import hub
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.runnables import RunnablePassthrough
+from langchain_core.callbacks import BaseCallbackHandler
 import streamlit as st
 import tempfile
 import os
-from dotenv import load_dotenv
-load_dotenv()
+from streamlit_extras.buy_me_a_coffee import button
+# from dotenv import load_dotenv
+# load_dotenv()
 
 # 제목
 st.title("ChatPDF")
 st.write("---")
 
+# OPENAI 키 입력받기
+openai_key = st.text_input("OPENAI_API_KEY", type = "password")
+
 # 파일 업로드
 uploaded_file = st.file_uploader("PDF 파일을 올려주세요!", type = ['pdf'])
 st.write("---")
+
+# Buy me a coffee
+button(username= "skhiancgo", floating = True, width = 221)
 
 def pdf_to_document(uploaded_file):
     temp_dir = tempfile.TemporaryDirectory()
@@ -53,6 +61,7 @@ if uploaded_file is not None:
     # Embedding
     embeddings_model = OpenAIEmbeddings(
         model = "text-embedding-3-large",
+        openai_api_key = openai_key
         # with the 'text-embedding-3' class
         # of models, you can specify the size
         # of the embeddings you want returned.
@@ -64,6 +73,15 @@ if uploaded_file is not None:
 
     # Chroma DB
     db = Chroma.from_documents(texts, embeddings_model)
+
+    # 스트리밍 처리할 Handler 생성
+    class StreamHandler(BaseCallbackHandler):
+        def __init__(self, container, initial_text = ""):
+            self.container = container
+            self.text = initial_text
+        def on_llm_new_token(self, token: str, **kwarg) -> None:
+            self.text += token
+            self.container.markdown(self.text)
 
     # User Input
     st.header("PDF에게 질문해보세요!")
@@ -82,12 +100,19 @@ if uploaded_file is not None:
             prompt = hub.pull("rlm/rag-prompt")  # 개발자들이 짜놓은 프롬프트 저장소
 
             # Generate
+            chat_box = st.empty()
+            stream_handler = StreamHandler(chat_box)
+            generate_llm = ChatOpenAI(model = "gpt-4o-mini",
+                                      temperature = 0,
+                                      openai_api_key = openai_key,
+                                      streaming = True,
+                                      callbacks = [stream_handler])
             def format_docs(docs):
                 return "\n\n".join(doc.page_content for doc in docs)
             rag_chain = (
                 {"context": retriever_from_llm | format_docs, "question": RunnablePassthrough()}
                 | prompt
-                | llm
+                | generate_llm
                 | StrOutputParser()  # 모델의 복잡한 응답 객체에서 순수 텍스트 답변만 뽑아냄.
             )
 
