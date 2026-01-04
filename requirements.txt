@@ -1,0 +1,16 @@
+# LangChain 핵심 및 통합 패키지
+langchain==0.3.20
+langchain-community
+langchain-openai
+langchain-chroma
+langchain-text-splitters
+
+# PDF 및 환경 설정
+pypdf
+python-dotenv
+
+# 웹 인터페이스
+streamlit
+
+# 중요: 리눅스 배포 환경에서의 SQLite 버전 문제 해결용
+pysqlite3-binary
