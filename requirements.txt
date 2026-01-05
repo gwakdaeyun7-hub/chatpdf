@@ -4,7 +4,9 @@ langchain-openai
 langchain-chroma
 langchain-text-splitters
 langchainhub
+tiktoken
 pypdf
+python-dotenv
 streamlit
 streamlit-extras
 pysqlite3-binary
