@@ -1,7 +1,19 @@
-__import__('pysqlite3')
+# 1. SQLite 패치 (Streamlit Cloud 배포용)
+# 이 코드는 반드시 다른 임포트보다 최상단에 있어야 합니다.
 import sys
-sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
+try:
+    __import__('pysqlite3')
+    sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
+except ImportError:
+    # 로컬(Windows) 환경 등 pysqlite3가 없는 경우 패스합니다.
+    pass
 
+import streamlit as st
+import tempfile
+import os
+from streamlit_extras.buy_me_a_coffee import button
+
+# LangChain 관련 임포트
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_openai import OpenAIEmbeddings
@@ -12,26 +24,20 @@ from langchain import hub
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.runnables import RunnablePassthrough
 from langchain_core.callbacks import BaseCallbackHandler
-import streamlit as st
-import tempfile
-import os
-from streamlit_extras.buy_me_a_coffee import button
-# from dotenv import load_dotenv
-# load_dotenv()
 
 # 제목
 st.title("ChatPDF")
 st.write("---")
 
-# OPENAI 키 입력받기
-openai_key = st.text_input("OPENAI_API_KEY", type = "password")
+# OPENAI 키 입력받기 (공백 제거 기능 추가)
+openai_key = st.text_input("OPENAI_API_KEY", type="password").strip()
 
 # 파일 업로드
-uploaded_file = st.file_uploader("PDF 파일을 올려주세요!", type = ['pdf'])
+uploaded_file = st.file_uploader("PDF 파일을 올려주세요!", type=['pdf'])
 st.write("---")
 
 # Buy me a coffee
-button(username= "skhiancgo", floating = True, width = 221)
+button(username="skhiancgo", floating=True, width=221)
 
 def pdf_to_document(uploaded_file):
     temp_dir = tempfile.TemporaryDirectory()
@@ -42,86 +48,95 @@ def pdf_to_document(uploaded_file):
     pages = loader.load_and_split()
     return pages
 
-# 업로드된 파일 처리
+# 스트리밍 핸들러 정의
+class StreamHandler(BaseCallbackHandler):
+    def __init__(self, container, initial_text=""):
+        self.container = container
+        self.text = initial_text
+    def on_llm_new_token(self, token: str, **kwarg) -> None:
+        self.text += token
+        self.container.markdown(self.text)
+
+# --- 메인 로직 시작 ---
+
+# 1. API 키가 없으면 경고 문구만 띄우고 진행하지 않음 (에러 방지 핵심)
+if not openai_key:
+    st.info("👋 API 키를 입력해주시면 PDF 분석을 시작할 수 있습니다.")
+    st.stop()
+
+# 2. 파일이 업로드 되었을 때만 실행
 if uploaded_file is not None:
-    pages = pdf_to_document(uploaded_file)
+    with st.spinner("PDF 문서를 분석하고 있습니다... 잠시만 기다려주세요."):
+        # PDF 변환
+        pages = pdf_to_document(uploaded_file)
 
-    # Splitter
-    text_splitter = RecursiveCharacterTextSplitter(
-        # Set a really small chunk size, just to show.
-        chunk_size = 300,  # 하나의 Chunk의 글자수
-        chunk_overlap = 20,  # Chunk마다 겹치는 글자수 (0~300, 280~580, 560~860)
-        length_function = len,  # 청크 길이를 측정하는 기준
-        is_separator_regex = False,
-    )
+        # Splitter
+        text_splitter = RecursiveCharacterTextSplitter(
+            chunk_size=300,
+            chunk_overlap=20,
+            length_function=len,
+            is_separator_regex=False,
+        )
+        texts = text_splitter.split_documents(pages)
 
-    texts = text_splitter.split_documents(pages)
-    # print(texts[0], "\n\n", texts[1])
+        # Embedding & DB Creation
+        # API 키가 확실히 있을 때만 생성
+        embeddings_model = OpenAIEmbeddings(
+            model="text-embedding-3-large",
+            openai_api_key=openai_key
+        )
+        
+        # Chroma DB 생성
+        db = Chroma.from_documents(texts, embeddings_model)
 
-    # Embedding
-    embeddings_model = OpenAIEmbeddings(
-        model = "text-embedding-3-large",
-        openai_api_key = openai_key
-        # with the 'text-embedding-3' class
-        # of models, you can specify the size
-        # of the embeddings you want returned.
-        # dimensions = 1024
-    )
-
-    # import chromadb
-    # chromadb.ai.client.SharedSystemClient.clear_system_cache()
-
-    # Chroma DB
-    db = Chroma.from_documents(texts, embeddings_model)
-
-    # 스트리밍 처리할 Handler 생성
-    class StreamHandler(BaseCallbackHandler):
-        def __init__(self, container, initial_text = ""):
-            self.container = container
-            self.text = initial_text
-        def on_llm_new_token(self, token: str, **kwarg) -> None:
-            self.text += token
-            self.container.markdown(self.text)
-
-    # User Input
+    # 3. 사용자 질문 입력 및 처리
     st.header("PDF에게 질문해보세요!")
     question = st.text_input("질문을 입력하세요")
 
     if st.button("질문하기"):
-        # API 키 입력 여부 확인
-        if not openai_key:
-            st.error("OPENAI_API_KEY를 입력해주세요.")
-            st.stop() # 이후 코드 실행을 즉시 중단합니다.
-        with st.spinner("Wait for it..."):
-            # Retriever
-            llm = ChatOpenAI(temperature = 0, openai_api_key = openai_key)
-            retriever_from_llm = MultiQueryRetriever.from_llm(  # 검색에 유리한 여러 상이한 질문으로 확장
-                retriever = db.as_retriever(),
-                llm = llm
+        if not question:
+            st.warning("질문을 입력해주세요.")
+            st.stop()
+
+        with st.spinner("답변을 생성하고 있습니다..."):
+            # Retriever 설정
+            llm = ChatOpenAI(
+                model="gpt-4o-mini",
+                temperature=0,
+                openai_api_key=openai_key
+            )
+            
+            retriever_from_llm = MultiQueryRetriever.from_llm(
+                retriever=db.as_retriever(),
+                llm=llm
             )
 
-            # Prompt Template
-            prompt = hub.pull("rlm/rag-prompt")  # 개발자들이 짜놓은 프롬프트 저장소
+            # Prompt & Chain
+            prompt = hub.pull("rlm/rag-prompt")
 
-            # Generate
             chat_box = st.empty()
             stream_handler = StreamHandler(chat_box)
-            generate_llm = ChatOpenAI(model = "gpt-4o-mini",
-                                      temperature = 0,
-                                      openai_api_key = openai_key,
-                                      streaming = True,
-                                      callbacks = [stream_handler])
+            
+            generate_llm = ChatOpenAI(
+                model="gpt-4o-mini",
+                temperature=0,
+                openai_api_key=openai_key,
+                streaming=True,
+                callbacks=[stream_handler]
+            )
+
             def format_docs(docs):
                 return "\n\n".join(doc.page_content for doc in docs)
+
             rag_chain = (
                 {"context": retriever_from_llm | format_docs, "question": RunnablePassthrough()}
                 | prompt
                 | generate_llm
-                | StrOutputParser()  # 모델의 복잡한 응답 객체에서 순수 텍스트 답변만 뽑아냄.
+                | StrOutputParser()
             )
 
-            # Question
-            result = rag_chain.invoke(question)
-
-import os
-print(os.environ.get("OPENAI_API_KEY"))
+            # 실행
+            try:
+                result = rag_chain.invoke(question)
+            except Exception as e:
+                st.error(f"에러가 발생했습니다: {e}")
