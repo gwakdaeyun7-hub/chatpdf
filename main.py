@@ -1,11 +1,9 @@
-# 1. SQLite 패치 (Streamlit Cloud 배포용)
-# 이 코드는 반드시 다른 임포트보다 최상단에 있어야 합니다.
+# 1. SQLite 패치 (Streamlit Cloud 배포용) - 최상단 유지
 import sys
 try:
     __import__('pysqlite3')
     sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
 except ImportError:
-    # 로컬(Windows) 환경 등 pysqlite3가 없는 경우 패스합니다.
     pass
 
 import streamlit as st
@@ -18,18 +16,29 @@ from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_openai import OpenAIEmbeddings
 from langchain_chroma import Chroma
-from langchain.retrievers import MultiQueryRetriever
 from langchain_openai import ChatOpenAI
 from langchain import hub
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.runnables import RunnablePassthrough
 from langchain_core.callbacks import BaseCallbackHandler
 
+# [핵심 수정] MultiQueryRetriever 만능 임포트 (경로 문제 해결)
+try:
+    # 1순위: 최신 LangChain 표준 경로
+    from langchain.retrievers.multi_query import MultiQueryRetriever
+except ImportError:
+    try:
+        # 2순위: 단축 경로
+        from langchain.retrievers import MultiQueryRetriever
+    except ImportError:
+        # 3순위: 커뮤니티 패키지 경로 (구버전 호환)
+        from langchain_community.retrievers import MultiQueryRetriever
+
 # 제목
 st.title("ChatPDF")
 st.write("---")
 
-# OPENAI 키 입력받기 (공백 제거 기능 추가)
+# OPENAI 키 입력받기 (공백 제거)
 openai_key = st.text_input("OPENAI_API_KEY", type="password").strip()
 
 # 파일 업로드
@@ -48,7 +57,6 @@ def pdf_to_document(uploaded_file):
     pages = loader.load_and_split()
     return pages
 
-# 스트리밍 핸들러 정의
 class StreamHandler(BaseCallbackHandler):
     def __init__(self, container, initial_text=""):
         self.container = container
@@ -57,14 +65,12 @@ class StreamHandler(BaseCallbackHandler):
         self.text += token
         self.container.markdown(self.text)
 
-# --- 메인 로직 시작 ---
+# --- 메인 로직 ---
 
-# 1. API 키가 없으면 경고 문구만 띄우고 진행하지 않음 (에러 방지 핵심)
 if not openai_key:
     st.info("👋 API 키를 입력해주시면 PDF 분석을 시작할 수 있습니다.")
     st.stop()
 
-# 2. 파일이 업로드 되었을 때만 실행
 if uploaded_file is not None:
     with st.spinner("PDF 문서를 분석하고 있습니다... 잠시만 기다려주세요."):
         # PDF 변환
@@ -79,17 +85,16 @@ if uploaded_file is not None:
         )
         texts = text_splitter.split_documents(pages)
 
-        # Embedding & DB Creation
-        # API 키가 확실히 있을 때만 생성
+        # Embedding
         embeddings_model = OpenAIEmbeddings(
             model="text-embedding-3-large",
             openai_api_key=openai_key
         )
         
-        # Chroma DB 생성
+        # Chroma DB
         db = Chroma.from_documents(texts, embeddings_model)
 
-    # 3. 사용자 질문 입력 및 처리
+    # 질문 입력
     st.header("PDF에게 질문해보세요!")
     question = st.text_input("질문을 입력하세요")
 
@@ -99,19 +104,18 @@ if uploaded_file is not None:
             st.stop()
 
         with st.spinner("답변을 생성하고 있습니다..."):
-            # Retriever 설정
             llm = ChatOpenAI(
                 model="gpt-4o-mini",
                 temperature=0,
                 openai_api_key=openai_key
             )
             
+            # Retriever 생성
             retriever_from_llm = MultiQueryRetriever.from_llm(
                 retriever=db.as_retriever(),
                 llm=llm
             )
 
-            # Prompt & Chain
             prompt = hub.pull("rlm/rag-prompt")
 
             chat_box = st.empty()
@@ -135,9 +139,7 @@ if uploaded_file is not None:
                 | StrOutputParser()
             )
 
-            # 실행
             try:
                 result = rag_chain.invoke(question)
             except Exception as e:
                 st.error(f"에러가 발생했습니다: {e}")
-
