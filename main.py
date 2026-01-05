@@ -17,15 +17,13 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_openai import OpenAIEmbeddings
 from langchain_chroma import Chroma
 from langchain_openai import ChatOpenAI
-
-# [수정 1] hub를 langchain이 아닌 langchainhub에서 직접 가져옴
-from langchainhub import pull
+from langchain_core.prompts import ChatPromptTemplate  # [변경] 프롬프트 직접 생성을 위한 임포트
 
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.runnables import RunnablePassthrough
 from langchain_core.callbacks import BaseCallbackHandler
 
-# MultiQueryRetriever 만능 임포트 (경로 문제 해결)
+# MultiQueryRetriever 만능 임포트
 try:
     from langchain.retrievers.multi_query import MultiQueryRetriever
 except ImportError:
@@ -116,8 +114,13 @@ if uploaded_file is not None:
                 llm=llm
             )
 
-            # [수정 2] hub.pull 대신 그냥 pull 사용
-            prompt = pull("rlm/rag-prompt")
+            # [수정] hub.pull 대신 프롬프트를 직접 정의 (에러 원천 차단)
+            template = """Answer the question based only on the following context:
+{context}
+
+Question: {question}
+"""
+            prompt = ChatPromptTemplate.from_template(template)
 
             chat_box = st.empty()
             stream_handler = StreamHandler(chat_box)
