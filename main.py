@@ -17,21 +17,21 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_openai import OpenAIEmbeddings
 from langchain_chroma import Chroma
 from langchain_openai import ChatOpenAI
-from langchain import hub
+
+# [수정 1] hub를 langchain이 아닌 langchainhub에서 직접 가져옴
+from langchainhub import pull
+
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.runnables import RunnablePassthrough
 from langchain_core.callbacks import BaseCallbackHandler
 
-# [핵심 수정] MultiQueryRetriever 만능 임포트 (경로 문제 해결)
+# MultiQueryRetriever 만능 임포트 (경로 문제 해결)
 try:
-    # 1순위: 최신 LangChain 표준 경로
     from langchain.retrievers.multi_query import MultiQueryRetriever
 except ImportError:
     try:
-        # 2순위: 단축 경로
         from langchain.retrievers import MultiQueryRetriever
     except ImportError:
-        # 3순위: 커뮤니티 패키지 경로 (구버전 호환)
         from langchain_community.retrievers import MultiQueryRetriever
 
 # 제목
@@ -116,7 +116,8 @@ if uploaded_file is not None:
                 llm=llm
             )
 
-            prompt = hub.pull("rlm/rag-prompt")
+            # [수정 2] hub.pull 대신 그냥 pull 사용
+            prompt = pull("rlm/rag-prompt")
 
             chat_box = st.empty()
             stream_handler = StreamHandler(chat_box)
