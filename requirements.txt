@@ -1,21 +1,10 @@
-# LangChain 핵심 라이브러리 (버전 명시)
 langchain>=0.3.0
 langchain-community
 langchain-openai
 langchain-chroma
 langchain-text-splitters
 langchainhub
-
-# PDF 파싱 엔진
 pypdf
-
-# 환경 변수 및 유틸리티
-python-dotenv
-
-# Streamlit 및 UI 확장
 streamlit
 streamlit-extras
-
-# 리눅스 배포 환경 필수 (SQLite 버전 패치용)
 pysqlite3-binary
-
