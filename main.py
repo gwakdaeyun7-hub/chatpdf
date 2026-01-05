@@ -88,9 +88,13 @@ if uploaded_file is not None:
     question = st.text_input("질문을 입력하세요")
 
     if st.button("질문하기"):
+        # API 키 입력 여부 확인
+        if not openai_key:
+            st.error("OPENAI_API_KEY를 입력해주세요.")
+            st.stop() # 이후 코드 실행을 즉시 중단합니다.
         with st.spinner("Wait for it..."):
             # Retriever
-            llm = ChatOpenAI(temperature = 0)
+            llm = ChatOpenAI(temperature = 0, openai_api_key = openai_key)
             retriever_from_llm = MultiQueryRetriever.from_llm(  # 검색에 유리한 여러 상이한 질문으로 확장
                 retriever = db.as_retriever(),
                 llm = llm
@@ -119,4 +123,5 @@ if uploaded_file is not None:
             # Question
             result = rag_chain.invoke(question)
 
-
+import os
+print(os.environ.get("OPENAI_API_KEY"))
