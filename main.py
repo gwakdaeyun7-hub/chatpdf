@@ -17,20 +17,12 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_openai import OpenAIEmbeddings
 from langchain_chroma import Chroma
 from langchain_openai import ChatOpenAI
-from langchain_core.prompts import ChatPromptTemplate  # [변경] 프롬프트 직접 생성을 위한 임포트
-
+from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.runnables import RunnablePassthrough
 from langchain_core.callbacks import BaseCallbackHandler
 
-# MultiQueryRetriever 만능 임포트
-try:
-    from langchain.retrievers.multi_query import MultiQueryRetriever
-except ImportError:
-    try:
-        from langchain.retrievers import MultiQueryRetriever
-    except ImportError:
-        from langchain_community.retrievers import MultiQueryRetriever
+# [변경] 불필요한 Retriever 임포트 제거 (에러 원인 삭제)
 
 # 제목
 st.title("ChatPDF")
@@ -102,19 +94,11 @@ if uploaded_file is not None:
             st.stop()
 
         with st.spinner("답변을 생성하고 있습니다..."):
-            llm = ChatOpenAI(
-                model="gpt-4o-mini",
-                temperature=0,
-                openai_api_key=openai_key
-            )
             
-            # Retriever 생성
-            retriever_from_llm = MultiQueryRetriever.from_llm(
-                retriever=db.as_retriever(),
-                llm=llm
-            )
+            # [수정] MultiQueryRetriever 제거 -> 기본 검색기 사용 (안정성 확보)
+            retriever = db.as_retriever()
 
-            # [수정] hub.pull 대신 프롬프트를 직접 정의 (에러 원천 차단)
+            # 프롬프트 직접 정의
             template = """Answer the question based only on the following context:
 {context}
 
@@ -137,7 +121,7 @@ Question: {question}
                 return "\n\n".join(doc.page_content for doc in docs)
 
             rag_chain = (
-                {"context": retriever_from_llm | format_docs, "question": RunnablePassthrough()}
+                {"context": retriever | format_docs, "question": RunnablePassthrough()}
                 | prompt
                 | generate_llm
                 | StrOutputParser()
